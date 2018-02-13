@@ -1,0 +1,92 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from lightgbm import LGBMRegressor
+import catboost as cb
+from catboost import CatBoostRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+
+def rmsle_models(labels, preds):
+    return 'rmsle', rmsle(preds, labels), False
+
+def rmsle(h, y): 
+    return np.sqrt(np.square(np.log(h + 1) - np.log(y + 1)).mean())
+
+train = pd.read_csv('../input/train.tsv', delimiter='\t')
+test = pd.read_csv('../input/test.tsv', delimiter='\t')
+
+# Get target and IDs
+target = np.log(train['price']+1) 
+train_id = train['train_id']
+test_id = test['test_id']
+train.drop(['train_id', 'price'], axis=1, inplace=True)
+test.drop('test_id', axis=1, inplace=True)
+
+# Spliting categories
+train_cats = train['category_name'].str.split('/', 0, expand=True)
+train_cats.columns = ['cat1', 'cat2', 'cat3', 'cat4', 'cat5']
+test_cats = test['category_name'].str.split('/', 0, expand=True)
+test_cats.columns = ['cat1', 'cat2', 'cat3', 'cat4', 'cat5']
+train = pd.concat([train.reset_index(), train_cats.reset_index()], axis=1)
+test = pd.concat([test.reset_index(), test_cats.reset_index()], axis=1)
+train.drop('category_name', axis=1, inplace=True)
+test.drop('category_name', axis=1, inplace=True)
+
+train.head(3)
+
+train['is_train'] = 1
+test['is_train'] = 0
+df = pd.concat([train, test], axis=0)
+df.brand_name.fillna('missing', inplace=True)
+df.cat1.fillna('missing', inplace=True)
+df.cat1 = df.cat1.astype('category')
+df.cat2.fillna('missing', inplace=True)
+df.cat2 = df.cat2.astype('category')
+df.cat3.fillna('missing', inplace=True)
+df.cat3 = df.cat3.astype('category')
+df.cat4.fillna('missing', inplace=True)
+df.cat4 = df.cat4.astype('category')
+df.cat5.fillna('missing', inplace=True)
+df.cat5 = df.cat5.astype('category')
+df.item_description = df.item_description.astype('category')
+df.name = df.name.astype('category')
+df.brand_name = df.brand_name.astype('category')
+df.name = df.name.cat.codes
+df.cat1 = df.cat1.cat.codes
+df.cat2 = df.cat2.cat.codes
+df.cat3 = df.cat3.cat.codes
+df.cat4 = df.cat4.cat.codes
+df.cat5 = df.cat5.cat.codes
+df.brand_name = df.brand_name.cat.codes
+df.item_description = df.item_description.cat.codes
+
+# Back to train and test
+df_test = df.loc[df['is_train'] == 0]
+df_train = df.loc[df['is_train'] == 1]
+df_test = df_test.drop(['is_train'], axis=1)
+df_train = df_train.drop(['is_train'], axis=1)
+
+#training and validating
+X, y = df_train.values, target.values
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+lgbm_params = {'n_estimators': 1000, 'learning_rate': 0.15, 'max_depth': 5,
+               'num_leaves': 31, 'subsample': 0.9, 'colsample_bytree': 0.8,
+               'min_child_samples': 50, 'n_jobs': 3}
+model = LGBMRegressor(**lgbm_params)
+model.fit(X_train, y_train,
+         eval_set=[(X_test, y_test)],
+         eval_metric=rmsle_models,
+         early_stopping_rounds=None,
+         verbose=True)
+
+#LGBM submit on full train data
+model = LGBMRegressor(**lgbm_params)
+model.fit(X, y,
+         early_stopping_rounds=None,
+         verbose=True)
+preds = model.predict(df_test)
+preds = np.exp(preds) - 1
+submit = pd.DataFrame({"test_id": test_id, "price": preds})
+
+submit.to_csv('sample_submission.csv', index=False)
