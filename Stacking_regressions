@@ -67,10 +67,10 @@ df_train = df.loc[df['is_train'] == 1]
 df_test = df_test.drop(['is_train'], axis=1)
 df_train = df_train.drop(['is_train'], axis=1)
 
-#training and validating
+#training
 X, y = df_train.values, target.values
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-lgbm_params = {'n_estimators': 1000, 'learning_rate': 0.15, 'max_depth': 5,
+lgbm_params = {'n_estimators': 300, 'learning_rate': 0.15, 'max_depth': 5,
                'num_leaves': 31, 'subsample': 0.9, 'colsample_bytree': 0.8,
                'min_child_samples': 50, 'n_jobs': 3}
 model = LGBMRegressor(**lgbm_params)
@@ -80,13 +80,43 @@ model.fit(X_train, y_train,
          early_stopping_rounds=None,
          verbose=True)
 
-#LGBM submit on full train data
+catb_params = {'n_estimators': 300, 'depth':5, 'learning_rate':0.037}
+model2=CatBoostRegressor(**catb_params)
+model2.fit(X_train, y_train)
+
+print(rmsle(model2.predict(X_train),y_train))
+print(rmsle(model2.predict(X_test),y_test))
+
+model3=LinearRegression(n_jobs=-1)
+model3.fit(X_train, y_train)
+print(rmsle(model3.predict(X_train),y_train))
+print(rmsle(model3.predict(X_test),y_test))
+
+#LGBM submit
 model = LGBMRegressor(**lgbm_params)
 model.fit(X, y,
          early_stopping_rounds=None,
          verbose=True)
 preds = model.predict(df_test)
 preds = np.exp(preds) - 1
-submit = pd.DataFrame({"test_id": test_id, "price": preds})
+submit = pd.DataFrame({"test_id": test_id, "price_LGBM": preds})
 
-submit.to_csv('sample_submission.csv', index=False)
+#CATBOOST submit
+model2 = CatBoostRegressor(**catb_params)
+model2.fit(X, y)
+preds2 = model2.predict(df_test)
+preds2 = np.exp(preds2) - 1
+submit['price_CB'] = preds2
+
+#LR submit
+model3 = LinearRegression(n_jobs=-1)
+model3.fit(X, y)
+preds3 = model3.predict(df_test)
+preds3 = np.exp(preds3) - 1
+submit['price_LR'] = preds3
+
+#stacking
+submit['price']=(submit['price_LGBM']+submit['price_CB']+submit['price_LR'])/3
+submit_f=submit.drop(['price_LGBM','price_CB','price_LR'],axis=1)
+submit_f.head()
+submit_f.to_csv('sample_submission.csv', index=False)
