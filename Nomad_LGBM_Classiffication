@@ -1,0 +1,45 @@
+import pandas as pd
+import lightgbm as lgb
+import numpy as np
+from sklearn.model_selection import train_test_split
+import pickle
+from sklearn.model_selection import GridSearchCV
+
+#Training part
+def rmsle(h, y): 
+    return np.sqrt(np.square(np.log(h + 1) - np.log(y + 1)).mean())
+
+df=pd.read_csv('train.csv', delimiter=',', encoding='cp1251')
+target=df['formation_energy_ev_natom']
+df=df.drop('formation_energy_ev_natom',axis=1)
+df=df.drop('id',axis=1)
+
+X_train,X_test,y_train,y_test=train_test_split(df,target,test_size=0.33,random_state=9)
+estimator = lgb.LGBMRegressor()
+param_grid = {
+    'learning_rate': [0.001, 0.005, 0.01, 0.1, 1],
+    'n_estimators': [20, 40, 100, 500, 1000],
+    'num_leaves': [2 ** 2,2 ** 3,2 ** 4,2 ** 5],
+}
+gbm = GridSearchCV(estimator, param_grid)
+gbm.fit(X_train, y_train)
+
+print('Best parameters found by grid search are:', gbm.best_params_)
+print('With this parameters I can get on train dataset:', rmsle(gbm.predict(X_train),y_train))
+print('With this parameters I can get on test dataset:', rmsle(gbm.predict(X_test),y_test))
+
+# save the model to disk
+filename = 'formation_energy_ev_natom.sav'
+pickle.dump(clf, open(filename, 'wb'))
+
+#Submission part
+df=pd.read_csv('test.csv', delimiter=',', encoding='cp1251')
+df=df.drop('id',axis=1)
+# load the model from disk
+loaded_model = pickle.load(open('formation_energy_ev_natom.sav', 'rb'))
+predicted=loaded_model.predict(df)
+
+final=pd.DataFrame()
+df2=pd.read_csv('test.csv', delimiter=',', encoding='cp1251')
+final['id']=df2['id']
+final['formation_energy_ev_natom']=predicted
